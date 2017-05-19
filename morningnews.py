@@ -27,7 +27,11 @@ class EmbyController():
 'x-emby-authorization': auth,
             'Content-Length': '{}'.format(len(self.params))
             }
+        # this will be mutated once we've authed with the token
+        self.auth_headers = None
+        # this will be mutated once we've hit Emby's api
         self.resp = None
+        # likewise as above
         self.token = None
 
     def authenticate(self):
@@ -42,7 +46,8 @@ class EmbyController():
             Content: {}'''.format(self.username,
                                   sha1(self.password).hexdigest(),
                                   resp.headers,
-                                  resp.content))
+                                  resp.content),
+                  Flush=True)
         self.resp = resp
         return resp
 
@@ -54,5 +59,7 @@ class EmbyController():
     def get_token(self):
         if not self.token:
             self.token = self.jsonify_resp()['AccessToken']
+        self.auth_headers = self.headers.copy().update(
+            {'X-MediaBrowser-Token': self.token})
         return self.token
 
