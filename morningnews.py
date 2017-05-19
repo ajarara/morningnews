@@ -7,6 +7,8 @@ EMBY_AUTH = 'MediaBrowser Client="Emby Mobile", Device="Firefox", DeviceId="27d9
 
 EMBY_IP = '192.168.5.151:8096'
 
+# please don't judge this code. It judges me enough. I just need a
+# working solution by tomorrow morning.
 class EmbyController():
 
     def __init__(self, username, password, auth=EMBY_AUTH, emby_ip=EMBY_IP):
@@ -23,8 +25,7 @@ class EmbyController():
         )
         self.headers = {
             'Content-type': 'application/json',
-            
-'x-emby-authorization': auth,
+            'x-emby-authorization': auth,
             'Content-Length': '{}'.format(len(self.params))
             }
         # this will be mutated once we've authed with the token
@@ -33,7 +34,10 @@ class EmbyController():
         self.resp = None
         # likewise as above
         self.token = None
-
+        # eugh
+        self.props = None
+        self.library = None
+        
     def authenticate(self):
         resp = requests.post(self.emby_token_url,
                              data=self.params,
@@ -54,7 +58,9 @@ class EmbyController():
     def jsonify_resp(self):
         if not self.resp:
             self.authenticate()
-        return json.loads(self.resp.content.decode('utf-8'))
+        if not self.props:
+            self.props = json.loads(self.resp.content.decode('utf-8'))
+        return self.props
 
     def get_token(self):
         if not self.token:
@@ -63,3 +69,23 @@ class EmbyController():
             {'X-MediaBrowser-Token': self.token})
         return self.token
 
+    # this indentation plays mind tricks. Don't trust it.
+    def get_library(self):
+        if not self.library:
+            self.library = requests.get(
+                "http://{}{}".format(
+                    self.emby_ip,
+                    "/Users/{}/Views".format(
+                        self.jsonify_resp()['SessionInfo']['UserId'])),
+                headers=self.auth_headers)
+        return self.library
+            
+
+    def get_live_tv(self):
+        return requests.get(
+            "http://{}{}".format(
+                self.emby_ip,
+                "/Users/{}/Items?parentId={}".format(
+                    self.jsonify_resp()['SessionInfo']['UserId'],
+                    self.get_library.content['Items'])),
+            headers=self.auth_headers)
