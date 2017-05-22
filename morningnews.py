@@ -91,6 +91,12 @@ def _extract_invariants_from_resp(resp):
         'AccessToken': vals['AccessToken']
     }
 
+def _json_play_post_data(channel_id, start_time, play_command):
+    return bytes(json.dumps({
+        'ItemIds': channel_id,
+        'StartPositionTicks': start_time,
+        'PlayCommand': play_command
+        }).encode('utf-8'))
 
 class EmbyController():
 
@@ -117,16 +123,18 @@ class EmbyController():
         self._emby_conn_check(resp, "Get request failed!")
         return resp
 
-    def post(self, directory, auth=False):
-        ''' post a http form to server, returning reply '''
+    def post(self, directory, data, auth=False):
+        ''' post a json form to server, returning reply '''
         if auth:
             resp = requests.post(
                 '{}'.format(self.emby_url) + directory,
+                data = data,
                 headers = self._auth_headers()
                 )
         else:
             resp = requests.post(
-                '{}'.format(self.emby_url) + directory)
+                '{}'.format(self.emby_url) + directory,
+                data = data)
         self._emby_conn_check(resp, "Post request failed!")
         return resp
 
@@ -184,6 +192,9 @@ class EmbyController():
         return resp_to_content_dict(resp)
 
     def get_live_channels(self):
+        # is there a way just to get the whole media collection
+        # and filter it here instead of traversing so much?
+        # or tell emby to get it for us?
         # we aren't interested in record count.
         top_level_views = self.get_views()['Items']
         # get the first livetv collection (there is only one)
@@ -196,8 +207,26 @@ class EmbyController():
         return self.get_views(livetv_channels_id)['Items']
 
 
-    def get_channel_id(self, channel_name):
-        pass
+    def get_channel_id_from_name(self, channel_name):
+        chans = self.get_live_channels()
+        return next(x['Id'] for x in chans if x['Name'] == channel_name)
+
+    # device name is friendly name
+    def get_session(self, device_name=''):
+        # add /?ControllableByUserId=self.UserId ??
+        if not device_name:
+            return resp_to_content_dict(self.get("/Sessions", auth=True))
+        sess = resp_to_content_dict(self.get("/Sessions", auth=True))
+        byName = next(x for x in sess if x['DeviceName'] == device_name)
+        return byName
+
+    def play_channel_on_device(self, channel_name, device_name):
+        channel_id = self.get_channel_id_from_name(channel_name)
+        device_id = self.get_session(device_name)['Id']
+        self.post("/emby/Sessions/{}/Playing".format(device_id),
+                  data = _json_play_post_data(channel_id, 0, 'PlayNow'),
+                  auth = True)
+        return True
 
 
     # ==================== GUTS ====================
@@ -212,19 +241,24 @@ class EmbyController():
             'X-MediaBrowser-Token': self.session_invariants(key='AccessToken')
         }
 
-    def _emby_conn_check(self, conn, error_msg):
-        if conn.status_code != 200:
+    def _emby_conn_check(self, conn, error_msg, expected_status=None):
+        
+        if not expected_status:
+            expected_status = set([200, 204])
+        if conn.status_code not in expected_status:
             raise ValueError('''
             Err: {} 
             Username: {}
             sha1: {}
             md5: {}
+            status_code: {}
             Headers: {}
             Content: {}'''.format(
                 error_msg,
                 self.username,
                 sha1(self.password).hexdigest(),
                 md5(self.password).hexdigest(),
+                conn.status_code,
                 conn.headers,
                 conn.content))
 
